@@ -1,0 +1,40 @@
+package com.turboguardvpn.vpn.data
+
+import retrofit2.Response
+import retrofit2.http.Body
+import retrofit2.http.GET
+import retrofit2.http.Header
+import retrofit2.http.POST
+
+interface ApiService {
+    @POST("login")
+    suspend fun login(@Body credentials: Map<String, String>): Response<LoginResponse>
+
+    @POST("refresh-token")
+    suspend fun refreshToken(@Body token: Map<String, String>): Response<TokenResponse>
+
+    @POST("register")
+    suspend fun register(@Body user: User): Response<User>
+
+    @POST("logout")
+    suspend fun logout(@Body token: Map<String, String>): Response<Unit>
+
+    @GET("current-user")
+    suspend fun getUserInfo(@Header("Authorization") token: String): Response<User>
+}
+
+data class LoginResponse(
+    val data: User,
+    val accessToken: String,
+    val refreshToken: String,
+    val message: String,
+    val success: Boolean
+)
+
+data class TokenResponse(
+    val accessToken: String,
+    val refreshToken: String,
+    val success: Boolean,
+    var expiresIn: Number,
+)
+

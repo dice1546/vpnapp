@@ -1,0 +1,142 @@
+package com.turboguardvpn.vpn.ui.screens.signin
+
+import android.util.Log
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.turboguardvpn.vpn.data.User
+import com.turboguardvpn.vpn.data.repository.UserRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.launch
+import retrofit2.HttpException
+import javax.inject.Inject
+
+@HiltViewModel
+class SignInViewModel @Inject constructor(private val userRepository: UserRepository) :
+    ViewModel() {
+    //    private val _isLoggedIn = mutableStateOf(false)
+//    val isLoggedIn: State<Boolean> = _isLoggedIn
+//
+//    private val _user = mutableStateOf<User?>(null)
+//    val user: State<User?> get() = _user
+//
+//    private val _errorMessage = mutableStateOf<String?>(null)
+//    val errorMessage: State<String?> get() = _errorMessage
+//    private val _isLoggedIn = mutableStateOf(false)
+//    val isLoggedIn: State<Boolean> = _isLoggedIn
+//
+//    private val _user = mutableStateOf<User?>(null)
+//    val user: State<User?> get() = _user
+//
+//    private val _errorMessage = mutableStateOf<String?>(null)
+//    val errorMessage: State<String?> get() = _errorMessage
+
+
+    init {
+        checkLoginStatus()
+        viewModelScope.launch {
+            while (true) {
+                delay(60000) // Check every minute
+                userRepository.refreshTokenIfNeeded()
+            }
+        }
+    }
+    private fun checkLoginStatus() {
+        viewModelScope.launch {
+            val accessToken = userRepository.getAccessToken()
+            val isAccessTokenValid = userRepository.isAccessTokenValid()
+            if (!accessToken.isNullOrEmpty() && !isAccessTokenValid) {
+                try {
+                    val userData = userRepository.getUserData()
+                    if (userData != null) {
+                        _user.value = userData
+                        _isLoggedIn.value = true
+                    } else {
+                        val userInfo = getUserInfo(accessToken)
+                        _user.value = userInfo
+                        _isLoggedIn.value = true
+                    }
+                } catch (e: Exception) {
+                    _errorMessage.value = "Auto-login failed: ${e.message}"
+                    _isLoggedIn.value = false
+                }
+            } else {
+                _isLoggedIn.value = false
+            }
+        }
+    }
+
+//    private fun checkLoginStatus() {
+//        viewModelScope.launch {
+//            val accessToken = userRepository.getAccessToken()
+//            Log.d("SignInViewModel", "Checking login status with access token: $accessToken")
+//            if (!accessToken.isNullOrEmpty()) {
+//                try {
+//                    val userInfo = getUserInfo(accessToken)
+//                    _user.value = userInfo
+//                    _isLoggedIn.value = true
+//                    Log.d("SignInViewModel", "Auto-login succeeded")
+//                } catch (e: Exception) {
+//                    _errorMessage.value = "Auto-login failed: ${e.message}"
+//                    _isLoggedIn.value = false
+//                    Log.e("SignInViewModel", "Auto-login failed", e)
+//                }
+//            } else {
+//                _isLoggedIn.value = false
+//                Log.d("SignInViewModel", "No access token found, user is not logged in")
+//            }
+//        }
+//    }
+
+
+    fun login(email: String, password: String) {
+        viewModelScope.launch {
+            try {
+                val loginResponse = userRepository.login(email, password)
+                _user.value = loginResponse.data
+                _isLoggedIn.value = true
+            } catch (e: HttpException) {
+                val errorMessage = e.message ?: e.response()?.errorBody()?.string() ?: "Unknown error"
+                _errorMessage.value = "Login failed: $errorMessage"
+                _isLoggedIn.value = false
+            } catch (e: Exception) {
+                _errorMessage.value = "Login failed: ${e.message}"
+                _isLoggedIn.value = false
+            }
+        }
+    }
+
+    fun refreshToken() {
+        viewModelScope.launch {
+            try {
+                val refreshToken =
+                    userRepository.getRefreshToken() ?: throw Exception("No refresh token found")
+                val tokenResponse = userRepository.refreshToken(refreshToken)
+                _user.value = getUserInfo(tokenResponse.accessToken)
+            } catch (e: Exception) {
+                _errorMessage.value = "Token refresh failed: ${e.message}"
+            }
+        }
+    }
+
+
+    fun logout() {
+        userRepository.clearTokens()
+        _user.value = null
+        _isLoggedIn.value = false
+    }
+
+    private suspend fun getUserInfo(accessToken: String): User {
+        val response = userRepository.getUserInfo("Bearer $accessToken")
+        if (response.isSuccessful) {
+            return response.body()!!
+        } else {
+            throw Exception("Error fetching user info")
+        }
+    }
+}
+

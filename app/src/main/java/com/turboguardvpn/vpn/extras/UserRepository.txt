@@ -1,0 +1,111 @@
+package com.turboguardvpn.vpn.data.repository
+
+import android.app.Application
+import android.content.Context
+import com.google.gson.Gson
+import com.turboguardvpn.vpn.data.ApiService
+import com.turboguardvpn.vpn.data.LoginResponse
+import com.turboguardvpn.vpn.data.TokenResponse
+import com.turboguardvpn.vpn.data.User
+import retrofit2.HttpException
+import retrofit2.Response
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class UserRepository @Inject constructor(
+    private val apiService: ApiService,
+    private val application: Application
+) {
+    private val sharedPreferences = application.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+
+    private var accessTokenExpirationTime: Long = 0L
+    suspend fun login(email: String, password: String): LoginResponse {
+        val response = apiService.login(mapOf("email" to email, "password" to password))
+        if (response.isSuccessful) {
+            val loginResponse = response.body()!!
+            saveTokens(loginResponse.accessToken, loginResponse.refreshToken)
+            saveUserData(loginResponse.data.toString())
+            return loginResponse
+        } else {
+            throw HttpException(response)
+        }
+    }
+
+// Update other API call functions similarly
+
+
+    suspend fun getUserInfo(accessToken: String): Response<User> {
+        return apiService.getUserInfo(accessToken)
+    }
+
+    private fun saveTokens(accessToken: String, refreshToken: String) {
+        with(sharedPreferences.edit()) {
+            putString("access_token", accessToken)
+            putString("refresh_token", refreshToken)
+            putLong("access_token_timestamp", System.currentTimeMillis())
+            apply()
+        }
+    }
+
+    fun isAccessTokenValid(): Boolean {
+        val timestamp = sharedPreferences.getLong("access_token_timestamp", 0)
+        val currentTime = System.currentTimeMillis()
+        val tokenLifetime = 3600 * 1000 // 1 hour (adjust as needed)
+        return currentTime - timestamp < tokenLifetime
+    }
+
+    fun getAccessToken(): String? {
+        return sharedPreferences.getString("access_token", null)
+    }
+
+    fun getRefreshToken(): String? {
+        return sharedPreferences.getString("refresh_token", null)
+    }
+
+    fun clearTokens() {
+        with(sharedPreferences.edit()) {
+            remove("access_token")
+            remove("refresh_token")
+            apply()
+        }
+    }
+
+    private fun saveUserData(userInfo: String) {
+        with(sharedPreferences.edit()) {
+            putString("user_data", Gson().toJson(userInfo))
+            apply()
+        }
+    }
+
+    fun getUserData(): User? {
+        val userData = sharedPreferences.getString("user_data", null)
+        return if (userData != null) {
+            Gson().fromJson(userData, User::class.java)
+        } else {
+            null
+        }
+    }
+
+
+    suspend fun refreshToken(refreshToken: String): TokenResponse {
+        val response = apiService.refreshToken(mapOf("refreshToken" to refreshToken))
+        if (response.isSuccessful) {
+            val tokenResponse = response.body()!!
+            saveTokens(tokenResponse.accessToken, tokenResponse.refreshToken)
+            val userInfo = getUserInfo(tokenResponse.accessToken)
+            saveUserData(userInfo.toString())
+            return tokenResponse
+        } else {
+            throw Exception("Error refreshing token")
+        }
+    }
+    suspend fun refreshTokenIfNeeded() {
+        if (System.currentTimeMillis() >= accessTokenExpirationTime) {
+            val refreshToken = getRefreshToken() ?: return
+            val tokenResponse = refreshToken(refreshToken)
+            accessTokenExpirationTime = System.currentTimeMillis() + tokenResponse.expiresIn.toLong() * 1000
+        }
+    }
+}
+
